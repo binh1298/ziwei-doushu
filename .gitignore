@@ -7,3 +7,7 @@ dist/
 *.tsbuildinfo
 .DS_Store
 node_modules
+
+# exported chart/reading history (personal data, never commit)
+ziwei-history*.json
+*.history.json
