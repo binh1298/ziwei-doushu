@@ -1,11 +1,14 @@
 'use client';
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import BirthForm, { type BirthFormState } from '@/components/BirthForm';
 import { formToBirthInfo } from '@/lib/ziwei/share';
 import { generateChart as buildChart } from '@/lib/ziwei/algorithm';
 import type { BirthInfo, ZiweiChart } from '@/lib/ziwei/types';
 import { useTheme } from '@/components/ThemeProvider';
+import { useI18n } from '@/lib/i18n/client';
+import LocaleSwitcher from '@/components/LocaleSwitcher';
+import { loadHemingRecords, upsertHeming, removeHemingRecord, formLabelParts, type HemingRecord } from '@/lib/history/store';
 
 // ─── AiContent 渲染器（与 InsightPanel 一致）────────────────
 function AiContent({ text, streaming }: { text: string; streaming?: boolean }) {
@@ -51,6 +54,7 @@ export default function HemingPage() {
   const router = useRouter();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+  const { t } = useI18n();
 
   // ─── 双方命盘状态 ─────────────────────────────────────────
   const [chartA, setChartA] = useState<ZiweiChart | null>(null);
@@ -68,6 +72,14 @@ export default function HemingPage() {
   const [apiMissing, setApiMissing] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const analysisRef = useRef<HTMLDivElement>(null);
+
+  // ─── 合盘历史（localStorage，按甲乙双方「姓名+生日」唯一）────────
+  const [records, setRecords] = useState<HemingRecord[]>([]);
+  const [prefillA, setPrefillA] = useState<BirthFormState | undefined>(undefined);
+  const [prefillB, setPrefillB] = useState<BirthFormState | undefined>(undefined);
+  const [formKey, setFormKey] = useState(0); // 还原历史时重新挂载两个表单
+  const lastSavedRef = useRef<string>('');
+  useEffect(() => { setRecords(loadHemingRecords()); }, []);
 
   // ─── 起盘（单次调用，返回 chart 给统一流程使用）──────────
   // 开源版不含后端 /api/generate：直接用本仓库的排盘引擎在浏览器里起盘
@@ -160,6 +172,33 @@ export default function HemingPage() {
     marginBottom: '16px', display: 'block',
   };
 
+  // 一次分析流式结束后保存（放在 runAnalysis 之外：回归测试会原样执行那段源码）
+  useEffect(() => {
+    if (analyzing || analysisError || !analysis.trim() || !formA || !formB) return;
+    if (lastSavedRef.current === analysis) return;
+    lastSavedRef.current = analysis;
+    upsertHeming(formA, formB, question, analysis);
+    setRecords(loadHemingRecords());
+  }, [analyzing, analysisError, analysis, formA, formB, question]);
+
+  const restoreRecord = (r: HemingRecord) => {
+    setPrefillA(r.formA);
+    setPrefillB(r.formB);
+    setFormKey(k => k + 1);
+    setQuestion(r.question);
+    setAnalysisError(false);
+    setApiMissing(false);
+    lastSavedRef.current = r.analysis;
+    setAnalysis(r.analysis);
+    setTimeout(() => analysisRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+  };
+
+  const pairLabel = (r: HemingRecord) => {
+    const a = formLabelParts(r.formA);
+    const b = formLabelParts(r.formB);
+    return `${a.name || t('未命名')} (${a.date}) × ${b.name || t('未命名')} (${b.date})`;
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-0)' }}>
       {/* 顶栏 */}
@@ -178,12 +217,13 @@ export default function HemingPage() {
           }}
         >
           <span style={{ fontSize: '16px' }}>‹</span>
-          <span>返回</span>
+          <span>{t('返回')}</span>
         </button>
         <div style={{ width: '1px', height: '20px', background: 'var(--bdr-med)' }} />
-        <span style={{ fontSize: '12px', color: 'var(--ac)', letterSpacing: '0.2em' }}>合盘分析</span>
+        <span style={{ fontSize: '12px', color: 'var(--ac)', letterSpacing: '0.2em' }}>{t('合盘分析')}</span>
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: '11px', color: 'var(--tx-3)' }}>感情 · 合伙 · 亲子 · 朋友</span>
+        <span style={{ fontSize: '11px', color: 'var(--tx-3)' }}>{t('感情 · 合伙 · 亲子 · 朋友')}</span>
+        <LocaleSwitcher />
       </header>
 
       {/* 主体 */}
@@ -193,10 +233,10 @@ export default function HemingPage() {
         <div style={{ textAlign: 'center', marginBottom: '36px' }}>
           <div style={{ fontSize: '28px', color: 'var(--ac)', opacity: 0.15, marginBottom: '12px' }}>☯</div>
           <h1 style={{ fontSize: '22px', fontWeight: 600, letterSpacing: '0.15em', color: 'var(--tx-0)', marginBottom: '8px' }}>
-            紫微合盘
+            {t('紫微合盘')}
           </h1>
           <p style={{ fontSize: '13px', color: 'var(--tx-3)', lineHeight: 1.6 }}>
-            输入两个人的出生信息，AI 基于倪海厦体系分析双方命盘的缘分匹配度、感情走向与相处建议
+            {t('输入两个人的出生信息，AI 基于倪海厦体系分析双方命盘的缘分匹配度、感情走向与相处建议')}
           </p>
         </div>
 
@@ -205,8 +245,10 @@ export default function HemingPage() {
           className="heming-grid">
           {/* 甲方 */}
           <div style={cardStyle}>
-            <span style={labelStyle}>甲方 — A</span>
+            <span style={labelStyle}>{t('甲方 — A')}</span>
             <BirthForm
+              key={`A-${formKey}`}
+              initialData={prefillA}
               hideSubmit
               onSubmit={() => {}}
               onFormSave={setFormA}
@@ -215,8 +257,10 @@ export default function HemingPage() {
 
           {/* 乙方 */}
           <div style={cardStyle}>
-            <span style={labelStyle}>乙方 — B</span>
+            <span style={labelStyle}>{t('乙方 — B')}</span>
             <BirthForm
+              key={`B-${formKey}`}
+              initialData={prefillB}
               hideSubmit
               onSubmit={() => {}}
               onFormSave={setFormB}
@@ -236,15 +280,15 @@ export default function HemingPage() {
           {/* 区块标题 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: (analysis || analyzing) ? '20px' : '24px' }}>
             <span style={{ color: 'var(--ac)', opacity: 0.6 }}>◉</span>
-            <span style={{ fontSize: '11px', letterSpacing: '0.3em', color: 'var(--tx-3)' }}>合盘分析 · HEMING</span>
+            <span style={{ fontSize: '11px', letterSpacing: '0.3em', color: 'var(--tx-3)' }}>{t('合盘分析 · HEMING')}</span>
           </div>
 
           {/* 状态分支 */}
           {!analysis && !analyzing && (
             <div style={{ textAlign: 'center', padding: '32px 0' }}>
               <div style={{ fontSize: '13px', color: 'var(--tx-3)', marginBottom: '24px', lineHeight: 1.7 }}>
-                填好双方出生信息后，点击下方按钮<br />
-                AI 将基于倪海厦体系深度分析两人缘分匹配度
+                {t('填好双方出生信息后，点击下方按钮')}<br />
+                {t('AI 将基于倪海厦体系深度分析两人缘分匹配度')}
               </div>
               <button
                 onClick={() => runAnalysis()}
@@ -259,11 +303,11 @@ export default function HemingPage() {
                 onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-1px)'; }}
                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(0)'; }}
               >
-                开始合盘分析
+                {t('开始合盘分析')}
               </button>
               {formError && (
                 <div style={{ marginTop: '20px', fontSize: '13px', color: '#dc2626' }}>
-                  {formError}
+                  {t(formError)}
                 </div>
               )}
             </div>
@@ -276,7 +320,7 @@ export default function HemingPage() {
                 border: '2px solid var(--bdr-med)', borderTopColor: 'var(--ac)',
                 borderRadius: '50%', animation: 'spin 0.8s linear infinite',
               }} />
-              正在对比双方命盘…
+              {t('正在对比双方命盘…')}
             </div>
           )}
 
@@ -285,8 +329,8 @@ export default function HemingPage() {
           {analysisError && (
             <div style={{ padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--bdr)', background: 'var(--bg-card)', fontSize: '13px', color: 'var(--tx-2)', marginTop: '12px' }}>
               {apiMissing
-                ? '开源版不含合盘 AI 分析接口（/api/heming），需要你自己实现后才能用。两人的命盘可以分别到「排盘」页（/chart）查看。'
-                : '分析暂时不可用，请重试。'}
+                ? t('开源版不含合盘 AI 分析接口（/api/heming），需要你自己实现后才能用。两人的命盘可以分别到「排盘」页（/chart）查看。')
+                : t('分析暂时不可用，请重试。')}
             </div>
           )}
         </div>
@@ -295,7 +339,7 @@ export default function HemingPage() {
         {analysis && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '16px' }}>
             <div style={{ fontSize: '11px', letterSpacing: '0.2em', color: 'var(--tx-3)', marginBottom: '4px' }}>
-              针对此次合盘继续追问
+              {t('针对此次合盘继续追问')}
             </div>
 
             {/* 快捷问题 */}
@@ -323,7 +367,7 @@ export default function HemingPage() {
                   onMouseEnter={e => { if (!analyzing) (e.currentTarget as HTMLElement).style.borderColor = 'var(--ac-bdr)'; }}
                   onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--bdr-med)'; }}
                 >
-                  {q}
+                  {t(q)}
                 </button>
               ))}
             </div>
@@ -335,7 +379,7 @@ export default function HemingPage() {
                 value={question}
                 onChange={e => setQuestion(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !analyzing) runAnalysis(question || undefined); }}
-                placeholder="继续追问，如：哪几年是两人感情关键期？"
+                placeholder={t('继续追问，如：哪几年是两人感情关键期？')}
                 disabled={analyzing}
                 className="input-base"
                 style={{ fontSize: '13px', flex: 1 }}
@@ -352,8 +396,44 @@ export default function HemingPage() {
                   transition: 'all 0.15s', whiteSpace: 'nowrap',
                 }}
               >
-                {analyzing ? '分析中…' : '继续追问'}
+                {analyzing ? t('分析中…') : t('继续追问')}
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* ═══ 合盘历史 ═══════════════════════════════════════════ */}
+        {records.length > 0 && (
+          <div style={{ ...cardStyle, marginTop: '24px' }}>
+            <span style={labelStyle}>{t('合盘历史')}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {records.map(r => (
+                <div key={r.key} style={{
+                  display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px',
+                  border: '1px solid var(--bdr)', borderRadius: '12px',
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--tx-0)' }}>{pairLabel(r)}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--tx-3)', marginTop: '2px' }}>
+                      {new Date(r.updatedAt).toLocaleString(undefined, { hour12: false })} · {r.question ? t('提问：{q}', { q: r.question }) : t('完整合盘')}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => restoreRecord(r)}
+                    style={{ fontSize: '12px', padding: '6px 12px', borderRadius: 'var(--r-pill)', border: '1px solid var(--bdr-med)', background: 'transparent', color: 'var(--tx-2)', cursor: 'pointer' }}
+                  >
+                    {t('查看')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { if (confirm(t('确定删除这条记录？'))) { removeHemingRecord(r.key); setRecords(loadHemingRecords()); } }}
+                    style={{ fontSize: '12px', padding: '6px 12px', borderRadius: 'var(--r-pill)', border: '1px solid var(--bdr-med)', background: 'transparent', color: '#dc2626', cursor: 'pointer' }}
+                  >
+                    {t('删除')}
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
         )}

@@ -6,6 +6,8 @@
 import Link from 'next/link';
 import { ALL_STARS, ALL_TOPICS, getKnowledge, STAR_BRIEF_SEO, STAR_TO_SLUG } from '@/lib/seo/knowledge';
 import { TOPIC_LABEL } from '@/lib/ziwei/db-analysis';
+import { getI18n } from '@/lib/i18n/server';
+import LocaleSwitcher from '@/components/LocaleSwitcher';
 
 export const metadata = {
   title: '紫微斗数知识库 · 14 主星 × 13 宫位 · 倪海厦正宗体系',
@@ -13,7 +15,8 @@ export const metadata = {
   keywords: ['紫微斗数', '倪海厦', '倪海厦紫微斗数', '紫微斗数全集', '紫微斗数全书', '14 主星', '12 宫位'],
 };
 
-export default function KnowledgeHomePage() {
+export default async function KnowledgeHomePage() {
+  const { t, term } = await getI18n();
   const STAR_DESCRIPTIONS_QUICK = STAR_BRIEF_SEO;
 
   return (
@@ -22,14 +25,17 @@ export default function KnowledgeHomePage() {
       <div className="px-6 py-4 flex items-center justify-between"
         style={{ borderBottom: '1px solid rgba(184,146,42,0.15)', background: 'var(--bg-page)' }}>
         <Link href="/" style={{ fontSize: '12px', color: 'var(--ac)', letterSpacing: '0.3em', textDecoration: 'none' }}>
-          ← 首页
+          {t('← 首页')}
         </Link>
         <div style={{ fontSize: '12px', color: 'var(--tx-3)', letterSpacing: '0.2em' }}>
-          倪师方法论 · 知识库
+          {t('倪师方法论 · 知识库')}
         </div>
-        <Link href="/library" style={{ fontSize: '12px', color: 'var(--ac)', letterSpacing: '0.2em', textDecoration: 'none' }}>
-          古籍 →
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link href="/library" style={{ fontSize: '12px', color: 'var(--ac)', letterSpacing: '0.2em', textDecoration: 'none' }}>
+            {t('古籍 →')}
+          </Link>
+          <LocaleSwitcher />
+        </div>
       </div>
 
       {/* Hero */}
@@ -40,18 +46,18 @@ export default function KnowledgeHomePage() {
           <div style={{ height: '1px', width: '48px', background: 'linear-gradient(to left, transparent, rgba(184,146,42,0.4))' }} />
         </div>
         <h1 style={{ fontSize: 'clamp(28px, 4vw, 42px)', fontWeight: 700, color: 'var(--tx-0)', letterSpacing: '0.15em', marginBottom: '12px' }}>
-          紫微斗数知识库
+          {t('紫微斗数知识库')}
         </h1>
         <p style={{ fontSize: '14px', color: 'var(--tx-2)', letterSpacing: '0.08em', maxWidth: '600px', margin: '0 auto', lineHeight: 1.7 }}>
-          14 主星 × 13 宫位 = <strong style={{ color: 'var(--ac)' }}>{ALL_STARS.length * ALL_TOPICS.length}</strong> 项专题<br />
-          基于倪海厦《天纪》体系编纂 · 含古籍引证
+          {t('14 主星 × 13 宫位 = ')}<strong style={{ color: 'var(--ac)' }}>{ALL_STARS.length * ALL_TOPICS.length}</strong>{t(' 项专题')}<br />
+          {t('基于倪海厦《天纪》体系编纂 · 含古籍引证')}
         </p>
       </div>
 
       {/* 14 主星卡片 */}
       <div className="max-w-5xl mx-auto px-6 pb-20">
         <div style={{ fontSize: '11px', color: 'var(--tx-3)', letterSpacing: '0.3em', textAlign: 'center', marginBottom: '24px' }}>
-          十四主星
+          {t('十四主星')}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
           {ALL_STARS.map(star => (
@@ -71,7 +77,7 @@ export default function KnowledgeHomePage() {
               className="hover:shadow-md hover:border-amber-400"
             >
               <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--tx-0)', letterSpacing: '0.15em' }}>
-                {star}
+                {term(star)}
               </div>
             </Link>
           ))}
@@ -88,7 +94,7 @@ export default function KnowledgeHomePage() {
             }}>
               <div className="flex items-baseline gap-3 mb-2">
                 <span style={{ fontSize: '20px', fontWeight: 700, color: 'var(--tx-0)', letterSpacing: '0.1em' }}>
-                  {star}星
+                  {t('{star}星', { star: term(star) })}
                 </span>
                 <span style={{ fontSize: '11px', color: 'var(--tx-3)', letterSpacing: '0.15em' }}>
                   ZI WEI · 14 STARS
@@ -98,13 +104,13 @@ export default function KnowledgeHomePage() {
                 {STAR_DESCRIPTIONS_QUICK[star] || ''}
               </p>
               <div className="flex flex-wrap gap-2">
-                {ALL_TOPICS.map(t => {
-                  const k = getKnowledge(star, t);
+                {ALL_TOPICS.map(topic => {
+                  const k = getKnowledge(star, topic);
                   if (!k.exists) return null;
                   return (
                     <Link
-                      key={t}
-                      href={`/knowledge/${STAR_TO_SLUG[star]}/${t}`}
+                      key={topic}
+                      href={`/knowledge/${STAR_TO_SLUG[star]}/${topic}`}
                       style={{
                         fontSize: '11px',
                         padding: '4px 10px',
@@ -115,7 +121,7 @@ export default function KnowledgeHomePage() {
                         textDecoration: 'none',
                       }}
                     >
-                      入{k.palaceName} · {TOPIC_LABEL[t]}
+                      {t('入{palace} · {topic}', { palace: term(k.palaceName), topic: t(TOPIC_LABEL[topic]) })}
                     </Link>
                   );
                 })}

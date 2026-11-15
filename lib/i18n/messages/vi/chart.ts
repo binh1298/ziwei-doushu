@@ -1,0 +1,101 @@
+/** 命盘页：ChartBoard / PalaceCell / TimeNav / ChartSummary / PatternsCard / StarDetailPanel / InsightPanel */
+export const chart: Record<string, string> = {
+  // /chart 页
+  '紫微斗数排盘': 'Lập lá số Tử Vi Đẩu Số',
+  '输入出生年月日时，开源排盘引擎即时生成命盘。': 'Nhập ngày giờ sinh, engine mã nguồn mở sẽ lập lá số ngay lập tức.',
+  '（本页为引擎 Demo，完整商业版界面不在开源范围；排盘内核完全开放。）':
+    '(Trang này là bản demo của engine; giao diện bản thương mại không nằm trong mã nguồn mở, nhưng phần lõi lập lá số hoàn toàn mở.)',
+  '← 重新起盘': '← Lập lá số khác',
+
+  // TimeNav
+  '大限 {a}–{b}': 'Đại hạn {a}–{b}',
+  '{view}·{stem}年四化：': 'Tứ hóa năm {stem} ({view}): ',
+
+  // ChartSummary
+  '命格总览': 'Tổng quan mệnh cách',
+  '命宫主星': 'Chính tinh cung Mệnh',
+  '性格特质': 'Đặc điểm tính cách',
+  '五行局 · 当前大限': 'Ngũ hành cục · Đại hạn hiện tại',
+  '{a}~{b}岁 · {p}': '{a}–{b} tuổi · {p}',
+  '公历 {y}-{m}-{d}': 'Dương lịch {d}/{m}/{y}',
+  '农历 {y}年{leap}{m}月{d}日': 'Âm lịch ngày {d} tháng {leap}{m} năm {y}',
+  '闰': 'nhuận ',
+  // ChartBoard 中央信息区
+  '当前大限': 'Đại hạn hiện tại',
+  '{a}–{b}岁': '{a}–{b} tuổi',
+  '点击宫位看三方四正': 'Bấm vào cung để xem tam phương tứ chính',
+  '{gz}年 · {b}时': 'Năm {gz} · giờ {b}',
+  '命宫{a} · 身宫{b}': 'Mệnh tại {a} · Thân tại {b}',
+  '本命四化': 'Tứ hóa bản mệnh',
+  '格局识别': 'Nhận diện cách cục',
+  '{n}个格局': '{n} cách cục',
+  '必须': 'Bắt buộc',
+  '加分': 'Cộng điểm',
+  '破格': 'Phá cách',
+  '出处 · {s}': 'Xuất xứ · {s}',
+  '大限运程': 'Vận trình đại hạn',
+
+  // PatternsCard
+  '格局识别（严格古书条件）': 'Nhận diện cách cục (theo điều kiện cổ thư)',
+  '{n}个': '{n}',
+
+  // StarDetailPanel
+  '主星': 'Chính tinh',
+  '吉星': 'Cát tinh',
+  '煞星': 'Sát tinh',
+  '杂星': 'Tạp diệu',
+  '五行 · {e}': 'Ngũ hành · {e}',
+  '性质 · {n}': 'Tính chất · {n}',
+  '位置 · {p}': 'Vị trí · {p}',
+  '庙旺': 'Miếu vượng',
+  '落陷': 'Hãm địa',
+  '平和': 'Bình hòa',
+  '星曜特质': 'Đặc tính sao',
+  '古书原文': 'Nguyên văn cổ thư',
+  '倪海厦老师解读': 'Thầy Nghê Hải Hạ luận giải',
+  '事业方向': 'Sự nghiệp',
+  '感情特质': 'Tình cảm',
+  '财运分析': 'Tài vận',
+  '健康提示': 'Sức khỏe',
+  '最佳宫位': 'Cung tốt nhất',
+  '注意宫位': 'Cung cần lưu ý',
+  '（解读正文暂只有中文）': '(Phần luận giải chi tiết hiện chỉ có bản tiếng Trung)',
+
+  // 星曜性质 / 关键词（constants.ts STAR_DESCRIPTIONS 与 patterns.ts getMingGongSummary）
+  '中性偏吉': 'Trung tính thiên cát',
+  '中性': 'Trung tính',
+  '凶中带吉': 'Hung mang cát',
+  '凶星': 'Hung tinh',
+  '帝王星': 'Sao đế vương', '智慧星': 'Sao trí tuệ', '贵人星': 'Sao quý nhân', '财帛星': 'Sao tài bạch',
+  '福德星': 'Sao phúc đức', '桃花星': 'Sao đào hoa', '财库星': 'Sao kho tài', '财富星': 'Sao tài phú',
+  '是非星': 'Sao thị phi', '印绶星': 'Sao ấn thụ', '荫庇星': 'Sao ấm phúc', '将帅星': 'Sao tướng soái', '变动星': 'Sao biến động',
+  '帝王': 'Đế vương', '尊贵': 'Tôn quý', '独立': 'Độc lập', '领导': 'Lãnh đạo',
+  '智慧': 'Trí tuệ', '机变': 'Linh hoạt', '谋略': 'Mưu lược', '善谋': 'Giỏi mưu tính',
+  '阳刚': 'Dương cương', '官贵': 'Quan quý', '慷慨': 'Hào phóng',
+  '财富': 'Tài phú', '刚毅': 'Cương nghị', '果断': 'Quyết đoán',
+  '温和': 'Ôn hòa', '享福': 'Hưởng phúc', '随缘': 'Tùy duyên',
+  '才艺': 'Tài nghệ', '刑囚': 'Hình tù', '桃花': 'Đào hoa', '多变': 'Đa biến',
+  '财库': 'Kho tài', '稳重': 'Điềm đạm', '保守': 'Bảo thủ',
+  '柔美': 'Dịu dàng', '阴柔': 'Âm nhu', '细腻': 'Tinh tế',
+  '欲望': 'Dục vọng', '多才': 'Đa tài',
+  '口舌': 'Khẩu thiệt', '是非': 'Thị phi', '善辩': 'Giỏi biện luận', '多思': 'Hay suy nghĩ', '口才': 'Khẩu tài',
+  '辅佐': 'Phụ tá', '行政': 'Hành chính', '印绶': 'Ấn thụ', '稳健': 'Vững vàng',
+  '荫护': 'Che chở', '医药': 'Y dược', '长辈': 'Bề trên',
+  '将星': 'Tướng tinh', '果决': 'Quả quyết', '孤克': 'Cô khắc',
+  '开创': 'Khai sáng', '变动': 'Biến động', '破坏': 'Phá hoại', '破旧': 'Phá cũ lập mới',
+
+  // InsightPanel
+  '命格': 'Mệnh cách',
+  '感情': 'Tình cảm',
+  '事业': 'Sự nghiệp',
+  '财运': 'Tài vận',
+  '健康': 'Sức khỏe',
+  '性格': 'Tính cách',
+  '命格解读生成中…': 'Đang tạo luận giải…',
+  '命理解读': 'Luận giải mệnh lý',
+  '继续追问，如：今年适合换工作吗？': 'Hỏi thêm, ví dụ: Năm nay có nên đổi việc không?',
+  '追问': 'Hỏi',
+  '开源版不含 AI 解读接口（/api/interpret），需要你自己实现后才能用，详见 README「快速开始」。排盘本身不需要任何 API Key。':
+    'Bản mã nguồn mở không có API luận giải AI (/api/interpret); bạn cần tự triển khai API này (xem mục "快速开始" trong README). Việc lập lá số không cần API Key.',
+  '解读失败，请稍后重试。': 'Luận giải thất bại, vui lòng thử lại sau.',
+};

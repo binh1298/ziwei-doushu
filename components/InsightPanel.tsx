@@ -1,14 +1,13 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ZiweiChart, Palace } from '@/lib/ziwei/types';
 import type { TimeView } from './TimeNav';
+import { useI18n } from '@/lib/i18n/client';
+import type { ChatMessage, ThreadMap } from '@/lib/history/store';
 
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-  hidden?: boolean; // don't show user bubble for auto/topic messages
-}
+export type Message = ChatMessage;
+export type { ThreadMap };
 
 interface SelectedSiHua {
   starName: string;
@@ -20,6 +19,10 @@ interface InsightPanelProps {
   chart: ZiweiChart;
   selectedPalace?: Palace | null;
   selectedSiHua?: SelectedSiHua | null;
+  /** 从历史记录还原的各页签线程；某页签已有内容就不再自动生成 */
+  initialThreads?: ThreadMap;
+  /** 线程变化（一次生成结束后）回调，供页面持久化 */
+  onThreadsChange?: (threads: ThreadMap) => void;
 }
 
 const TOPICS = [
@@ -182,37 +185,120 @@ function AiContent({ text, streaming }: { text: string; streaming?: boolean }) {
   );
 }
 
-export default function InsightPanel({ chart, selectedPalace, selectedSiHua }: InsightPanelProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
+/** 宫位 / 四化点击的分析单独放一个页签 */
+const PALACE_TAB = 'palace';
+type TabKey = typeof TOPICS[number]['key'] | typeof PALACE_TAB;
+
+export default function InsightPanel({ chart, selectedPalace, selectedSiHua, initialThreads, onThreadsChange }: InsightPanelProps) {
+  const { t, term } = useI18n();
+  const [threads, setThreads] = useState<ThreadMap>(() => initialThreads ?? {});
+  const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [activeTopic, setActiveTopic] = useState<string>('overview');
-  const messagesRef = useRef<Message[]>([]); // always-current copy for closures
+  const [streamingTab, setStreamingTab] = useState<TabKey | null>(null);
+  const threadsRef = useRef<ThreadMap>(threads); // always-current copy for closures
   const loadingRef = useRef(false);
   const autoLoaded = useRef(false);
   const lastPalaceBranch = useRef<number | undefined>(undefined);
   const lastSiHuaKey = useRef<string | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const pendingTab = useRef<TabKey | null>(null); // 别的页签正在生成时点开的空页签，排队等生成
 
   // Keep refs in sync
-  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { threadsRef.current = threads; }, [threads]);
   useEffect(() => { loadingRef.current = loading; }, [loading]);
 
-  // Auto-scroll
+  // 持久化：流式输出结束后再通知页面保存，避免每个 delta 都写一次 localStorage
+  useEffect(() => {
+    if (!loading && Object.values(threads).some(m => m.length > 0)) onThreadsChange?.(threads);
+  }, [threads, loading, onThreadsChange]);
+
+  const activeMessages = threads[activeTab] ?? [];
+
+  // Auto-scroll（切页签或当前页签有新内容时）
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [activeMessages, activeTab]);
 
-  // Auto-generate 命格总览 on mount
+  const setThread = useCallback((tab: TabKey, update: (prev: Message[]) => Message[]) => {
+    setThreads(prev => ({ ...prev, [tab]: update(prev[tab] ?? []) }));
+  }, []);
+
+  const streamResponse = async (tab: TabKey, apiMessages: { role: 'user' | 'assistant'; content: string }[]) => {
+    try {
+      const res = await fetch('/api/interpret', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chart, messages: apiMessages }),
+      });
+      if (res.status === 404) throw new Error('api-missing');
+      if (!res.ok) throw new Error('请求失败');
+      if (!res.body) throw new Error('无响应流');
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let assistantText = '';
+
+      setThread(tab, prev => [...prev, { role: 'assistant', content: '' }]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        for (const line of chunk.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6);
+          if (data === '[DONE]') break;
+          try {
+            const delta = JSON.parse(data).delta?.text ?? '';
+            assistantText += delta;
+            setThread(tab, prev => {
+              const updated = [...prev];
+              updated[updated.length - 1] = { role: 'assistant', content: assistantText };
+              return updated;
+            });
+          } catch { /* skip */ }
+        }
+      }
+    } catch (e) {
+      const missing = e instanceof Error && e.message === 'api-missing';
+      setThread(tab, prev => [...prev, { role: 'assistant', content: missing ? t('开源版不含 AI 解读接口（/api/interpret），需要你自己实现后才能用，详见 README「快速开始」。排盘本身不需要任何 API Key。') : t('解读失败，请稍后重试。') }]);
+    } finally {
+      setLoading(false);
+      setStreamingTab(null);
+      loadingRef.current = false;
+    }
+  };
+
+  /** 向某个页签的线程发一条消息；上下文只带该页签自己的历史 */
+  const sendMessage = (tab: TabKey, text: string, hidden = false, label?: string) => {
+    if (!text.trim() || loadingRef.current) return;
+    loadingRef.current = true;
+    setLoading(true);
+    setStreamingTab(tab);
+
+    const userMsg: Message = { role: 'user', content: text, hidden, label };
+    // Capture current thread synchronously via ref (avoids stale closure)
+    const apiMessages = [...(threadsRef.current[tab] ?? []), userMsg].map(m => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    setThread(tab, prev => [...prev, userMsg]);
+    setInput('');
+    streamResponse(tab, apiMessages);
+  };
+
+  // Auto-generate 命格总览 on mount（从历史还原时已有内容，不再重新生成）
   useEffect(() => {
     if (autoLoaded.current) return;
     autoLoaded.current = true;
-    sendMessage(TOPIC_PROMPTS.overview, true);
+    if (!(threadsRef.current.overview?.length)) sendMessage('overview', TOPIC_PROMPTS.overview, true);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Inject palace analysis when palace selected
+  // Inject palace analysis when palace selected → 宫位页签
   useEffect(() => {
     if (!selectedPalace || selectedPalace.branch === lastPalaceBranch.current) return;
     lastPalaceBranch.current = selectedPalace.branch;
@@ -237,10 +323,14 @@ ${selectedPalace.name}在命盘中的意义，以及这种星曜配置的整体�
 **【实际建议】**
 基于此宫的具体建议。`;
 
-    sendMessage(prompt, true);
+    const label = `${term(selectedPalace.name)} · ${majorStars.length > 0
+      ? majorStars.map(s => `${term(s.name)}${s.siHua ? ' ' + t('化{x}', { x: term(s.siHua) }) : ''}`).join('、')
+      : t('空宫（借对宫）')}`;
+    setActiveTab(PALACE_TAB);
+    sendMessage(PALACE_TAB, prompt, false, label);
   }, [selectedPalace]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 注入四化飞化分析
+  // 注入四化飞化分析 → 宫位页签
   useEffect(() => {
     if (!selectedSiHua) return;
     const key = `${selectedSiHua.starName}-${selectedSiHua.siHua}-${selectedSiHua.view}`;
@@ -271,127 +361,109 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
 **【实际建议】**
 基于此四化的具体可操作建议。`;
 
-    sendMessage(prompt, true);
+    const label = `${t(viewLabel)} · ${t('{star}化{x}', { star: term(selectedSiHua.starName), x: term(selectedSiHua.siHua) })}`;
+    setActiveTab(PALACE_TAB);
+    sendMessage(PALACE_TAB, prompt, false, label);
   }, [selectedSiHua]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const streamResponse = async (apiMessages: { role: 'user' | 'assistant'; content: string }[]) => {
-    try {
-      const res = await fetch('/api/interpret', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chart, messages: apiMessages }),
-      });
-      if (res.status === 404) throw new Error('api-missing');
-      if (!res.ok) throw new Error('请求失败');
-      if (!res.body) throw new Error('无响应流');
+  /** 点页签：切换显示；该页签还没生成过就自动生成一次（正在生成别的页签时先排队） */
+  const handleTabClick = (tab: TabKey) => {
+    setActiveTab(tab);
+    if (tab === PALACE_TAB) { pendingTab.current = null; return; }
+    if (threadsRef.current[tab]?.length) { pendingTab.current = null; return; }
+    if (loadingRef.current) { pendingTab.current = tab; return; }
+    sendMessage(tab, TOPIC_PROMPTS[tab], true);
+  };
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let assistantText = '';
-
-      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        for (const line of chunk.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6);
-          if (data === '[DONE]') break;
-          try {
-            const delta = JSON.parse(data).delta?.text ?? '';
-            assistantText += delta;
-            setMessages(prev => {
-              const updated = [...prev];
-              updated[updated.length - 1] = { role: 'assistant', content: assistantText };
-              return updated;
-            });
-          } catch { /* skip */ }
-        }
-      }
-    } catch (e) {
-      const missing = e instanceof Error && e.message === 'api-missing';
-      setMessages(prev => [...prev, { role: 'assistant', content: missing ? '开源版不含 AI 解读接口（/api/interpret），需要你自己实现后才能用，详见 README「快速开始」。排盘本身不需要任何 API Key。' : '解读失败，请稍后重试。' }]);
-    } finally {
-      setLoading(false);
-      loadingRef.current = false;
+  // 上一个生成结束后，自动生成排队中的页签（用户仍停在那个页签上且它还是空的）
+  useEffect(() => {
+    if (loading) return;
+    const tab = pendingTab.current;
+    pendingTab.current = null;
+    if (tab && tab === activeTab && tab !== PALACE_TAB && !(threadsRef.current[tab]?.length)) {
+      sendMessage(tab, TOPIC_PROMPTS[tab], true);
     }
-  };
+  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sendMessage = (text: string, hidden = false) => {
-    if (!text.trim() || loadingRef.current) return;
-    loadingRef.current = true;
-    setLoading(true);
-
-    const userMsg: Message = { role: 'user', content: text, hidden };
-    // Capture current messages synchronously via ref (avoids stale closure)
-    const apiMessages = [...messagesRef.current, userMsg].map(m => ({
-      role: m.role,
-      content: m.content,
-    }));
-
-    setMessages(prev => [...prev, userMsg]);
-    setInput('');
-    streamResponse(apiMessages);
-  };
-
-  const handleTopicClick = (topicKey: string) => {
-    if (loadingRef.current) return;
-    setActiveTopic(topicKey);
-    sendMessage(TOPIC_PROMPTS[topicKey], true);
+  /** 重新生成当前页签（清空该页签线程） */
+  const handleRegenerate = () => {
+    if (loadingRef.current || activeTab === PALACE_TAB) return;
+    setThread(activeTab, () => []);
+    threadsRef.current = { ...threadsRef.current, [activeTab]: [] };
+    sendMessage(activeTab, TOPIC_PROMPTS[activeTab], true);
   };
 
   const handleSend = () => {
-    sendMessage(input);
+    sendMessage(activeTab, input);
   };
+
+  const activeLabel = activeTab === PALACE_TAB ? t('宫位') : t(TOPICS.find(x => x.key === activeTab)?.label ?? '');
+  const streamingLabel = streamingTab === PALACE_TAB ? t('宫位') : t(TOPICS.find(x => x.key === streamingTab)?.label ?? '');
+  const showPalaceTab = (threads[PALACE_TAB]?.length ?? 0) > 0 || !!selectedPalace || !!selectedSiHua;
+  const tabs: { key: TabKey; label: string }[] = [
+    ...TOPICS.map(x => ({ key: x.key as TabKey, label: t(x.label) })),
+    ...(showPalaceTab ? [{ key: PALACE_TAB as TabKey, label: t('宫位') }] : []),
+  ];
+  const firstAssistantIdx = activeMessages.findIndex(m => m.role === 'assistant');
 
   return (
     <div className="flex flex-col h-full rounded-xl overflow-hidden card-glass">
 
-      {/* ── Topic buttons ── */}
+      {/* ── Tabs ── */}
       <div className="flex-shrink-0 px-2 pt-2.5 pb-2" style={{ borderBottom: '1px solid var(--t-border)' }}>
-        <div className="grid grid-cols-6 gap-1">
-          {TOPICS.map(t => {
-            const isActive = activeTopic === t.key;
+        <div className={`grid gap-1 ${showPalaceTab ? 'grid-cols-7' : 'grid-cols-6'}`}>
+          {tabs.map(tab => {
+            const isActive = activeTab === tab.key;
+            const hasContent = (threads[tab.key]?.length ?? 0) > 0;
+            const isStreaming = streamingTab === tab.key;
             return (
               <button
-                key={t.key}
-                onClick={() => handleTopicClick(t.key)}
-                disabled={loading}
-                className="py-1.5 text-[10px] font-medium rounded-lg transition-all duration-150 disabled:opacity-40"
+                key={tab.key}
+                onClick={() => handleTabClick(tab.key)}
+                className="relative py-1.5 text-[10px] font-medium rounded-lg transition-all duration-150"
                 style={{
                   background: isActive ? 'rgba(212,168,67,0.12)' : 'transparent',
                   border: `1px solid ${isActive ? 'rgba(212,168,67,0.3)' : 'var(--t-border)'}`,
-                  color: isActive ? 'var(--t-gold)' : 'var(--t-faint)',
+                  color: isActive ? 'var(--t-gold)' : hasContent ? 'var(--t-text2)' : 'var(--t-faint)',
                 }}
               >
-                {t.label}
+                {tab.label}
+                {(hasContent || isStreaming) && (
+                  <span
+                    className={`absolute top-1 right-1 w-1 h-1 rounded-full ${isStreaming ? 'animate-pulse' : ''}`}
+                    style={{ background: isStreaming ? 'var(--t-gold)' : 'rgba(212,168,67,0.5)' }}
+                  />
+                )}
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* ── Messages ── */}
+      {/* ── Messages (当前页签) ── */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
 
-        {/* Loading state before first message */}
-        {messages.length === 0 && (
+        {activeMessages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="text-4xl mb-3" style={{ color: 'var(--t-gold)', opacity: 0.1 }}>✦</div>
-            <p className="text-[10px] animate-pulse" style={{ color: 'var(--t-faint)' }}>命格解读生成中…</p>
+            <p className={`text-[10px] ${loading && streamingTab === activeTab ? 'animate-pulse' : ''}`} style={{ color: 'var(--t-faint)' }}>
+              {activeTab === PALACE_TAB
+                ? t('点击命盘上的宫位，这里会显示该宫的解读')
+                : loading && streamingTab !== activeTab
+                  ? t('正在生成「{topic}」，完成后自动开始这一页', { topic: streamingLabel })
+                  : t('命格解读生成中…')}
+            </p>
           </div>
         )}
 
         <AnimatePresence initial={false}>
-          {messages.map((msg, i) => {
+          {activeMessages.map((msg, i) => {
             if (msg.role === 'user' && msg.hidden) return null;
 
             if (msg.role === 'user') {
               return (
                 <motion.div
-                  key={i}
+                  key={`${activeTab}-${i}`}
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   className="flex justify-end"
@@ -404,17 +476,17 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
                       color: 'var(--t-gold)',
                     }}
                   >
-                    {msg.content}
+                    {msg.label ?? msg.content}
                   </div>
                 </motion.div>
               );
             }
 
             // Assistant message
-            const isLastMsg = i === messages.length - 1;
+            const isLastMsg = i === activeMessages.length - 1;
             return (
               <motion.div
-                key={i}
+                key={`${activeTab}-${i}`}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
               >
@@ -423,16 +495,25 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
                   style={{ color: 'var(--t-faint)' }}
                 >
                   <span style={{ color: 'var(--t-gold)', opacity: 0.4 }}>✦</span>
-                  命理解读
+                  {t('命理解读')}
+                  {i === firstAssistantIdx && activeTab !== PALACE_TAB && !loading && (
+                    <button
+                      onClick={handleRegenerate}
+                      className="ml-auto text-[9px] px-1.5 py-0.5 rounded border transition-opacity hover:opacity-100"
+                      style={{ borderColor: 'var(--t-border)', color: 'var(--t-faint)', opacity: 0.7 }}
+                    >
+                      {t('重新生成')}
+                    </button>
+                  )}
                 </div>
-                <AiContent text={msg.content} streaming={loading && isLastMsg} />
+                <AiContent text={msg.content} streaming={loading && streamingTab === activeTab && isLastMsg} />
               </motion.div>
             );
           })}
         </AnimatePresence>
       </div>
 
-      {/* ── Input ── */}
+      {/* ── Input（追问进当前页签） ── */}
       <div className="flex-shrink-0 px-3 pb-3 pt-2" style={{ borderTop: '1px solid var(--t-border)' }}>
         <div className="flex gap-2">
           <input
@@ -440,8 +521,8 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
-            placeholder="继续追问，如：今年适合换工作吗？"
-            disabled={loading}
+            placeholder={t('针对「{topic}」继续追问或要求展开…', { topic: activeLabel })}
+            disabled={loading || activeMessages.length === 0}
             className="flex-1 rounded-lg px-3 py-2 text-[11px] focus:outline-none transition-colors"
             style={{
               background: 'var(--t-card)',
@@ -451,7 +532,7 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
           />
           <button
             onClick={handleSend}
-            disabled={loading || !input.trim()}
+            disabled={loading || !input.trim() || activeMessages.length === 0}
             className="px-3 py-2 rounded-lg text-[11px] font-medium transition-all disabled:opacity-30 disabled:cursor-not-allowed"
             style={{
               background: 'rgba(212,168,67,0.15)',
@@ -459,7 +540,7 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
               color: 'var(--t-gold)',
             }}
           >
-            {loading ? '…' : '追问'}
+            {loading ? '…' : t('追问')}
           </button>
         </div>
       </div>
